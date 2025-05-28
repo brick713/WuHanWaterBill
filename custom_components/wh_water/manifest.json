@@ -1,0 +1,11 @@
+{
+  "domain": "wh_water",
+  "name": "武汉水费",
+  "version": "1.0.0",
+  "documentation": "https://github.com/brick713/WuHanWaterBill",
+  "codeowners": ["@brick713"],
+  "requirements": [],
+  "dependencies": ["http"],
+  "iot_class": "cloud_polling",
+  "config_flow": true
+}
