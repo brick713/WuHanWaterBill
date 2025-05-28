@@ -35,10 +35,21 @@ class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 json={"userCode": user_code, "source": "ONLINE"},
                 timeout=REQUEST_TIMEOUT
             ) as resp:
+                # 处理HTTP错误码
                 if resp.status != 200:
-                    return False
+                    body = await resp.text()
+                    LOGGER.error(f"HTTP错误 {resp.status}: {body}")
+                    return "http_error"
+
                 data = await resp.json()
-                return "restMoney" in data
-        except Exception as e:
-            LOGGER.error("Connection test failed: %s", e)
-            return False
+                
+                # 检查关键字段
+                if "restMoney" not in data:
+                    LOGGER.error("响应缺少关键字段: %s", data)
+                    return "invalid_response"
+                    
+                return "success"
+                
+        except aiohttp.ClientError as e:
+            LOGGER.error("连接错误: %s", str(e))
+            return "connection_failed"
