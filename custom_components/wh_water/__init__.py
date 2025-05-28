@@ -15,7 +15,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry):
         name=DOMAIN,
         update_method=async_update_data,
         update_interval=SCAN_INTERVAL,
-        update_interval_supported=True,
     )
     
     await coordinator.async_config_entry_first_refresh()
