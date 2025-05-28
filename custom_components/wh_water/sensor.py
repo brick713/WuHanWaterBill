@@ -1,5 +1,6 @@
 from homeassistant.components.sensor import SensorEntity, SensorStateClass
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from .const import DOMAIN, ATTR_MAP, LOGGER, CONF_USER_CODE
 
 async def async_setup_entry(hass, entry, async_add_entities):
@@ -26,7 +27,7 @@ async def async_update_data(hass, user_code):
     "Priority": "u=3, i"
   }
     
-    session = hass.helpers.aiohttp_client.async_get_clientsession(hass)
+    session = async_get_clientsession(hass)
     try:
         async with session.post(
             API_URL,
@@ -72,6 +73,10 @@ class MonthlyUsageSensor(WaterBaseSensor):
     def native_value(self):
         records = self.coordinator.data.get("payMessageList", [])
         return records[0]["totalFee"] if records else 0
+
+    @property
+    def native_unit_of_measurement(self):
+        return "元"
 
     @property
     def extra_state_attributes(self):
