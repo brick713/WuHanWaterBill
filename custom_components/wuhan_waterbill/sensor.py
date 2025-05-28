@@ -1,96 +1,86 @@
-"""Sensor platform for Wuhan Water."""
-from __future__ import annotations
+from homeassistant.components.sensor import SensorEntity, SensorStateClass
+from homeassistant.helpers.update_coordinator import CoordinatorEntity
+from .const import DOMAIN, ATTR_MAP, LOGGER, CONF_USER_CODE
 
-from homeassistant.components.sensor import (
-    SensorEntity,
-    SensorDeviceClass,
-    SensorStateClass,
-)
-from homeassistant.config_entries import ConfigEntry
-from homeassistant.const import CURRENCY_YUAN
-from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.update_coordinator import (
-    CoordinatorEntity,
-    DataUpdateCoordinator,
-)
-
-from .const import (
-    ATTR_DRAIN_FEE,
-    ATTR_LATEST_MONTH,
-    ATTR_REST_MONEY,
-    ATTR_TOTAL_FEE,
-    ATTR_USE_WATER,
-    ATTR_WATER_FEE,
-    DOMAIN,
-    LOGGER,
-)
-
-async def async_setup_entry(
-    hass: HomeAssistant,
-    entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
-) -> None:
-    """Set up the sensor platform."""
+async def async_setup_entry(hass, entry, async_add_entities):
     coordinator = hass.data[DOMAIN][entry.entry_id]
+    user_code = entry.data[CONF_USER_CODE]
+    
+    entities = [
+        BalanceSensor(coordinator, user_code),
+        MonthlyUsageSensor(coordinator, user_code),
+        YearlyUsageSensor(coordinator, user_code)
+    ]
+    async_add_entities(entities)
 
-    async_add_entities([
-        WhWaterBalanceSensor(coordinator, entry),
-        WhWaterUsageSensor(coordinator, entry)
-    ])
+async def async_update_data(hass, user_code):
+    session = hass.helpers.aiohttp_client.async_get_clientsession(hass)
+    try:
+        async with session.post(
+            API_URL,
+            json={"userCode": user_code, "source": "ONLINE"},
+            timeout=REQUEST_TIMEOUT
+        ) as resp:
+            resp.raise_for_status()
+            return await resp.json()
+    except Exception as e:
+        LOGGER.error("Update failed: %s", e)
+        return None
 
-class WhWaterSensor(CoordinatorEntity):
-    """Representation of a Wuhan Water sensor."""
-
-    def __init__(self, coordinator, config_entry):
-        """Initialize the sensor."""
+class WaterBaseSensor(CoordinatorEntity, SensorEntity):
+    _attr_has_entity_name = True
+    
+    def __init__(self, coordinator, user_code):
         super().__init__(coordinator)
-        self._config_entry = config_entry
+        self._user_code = user_code
         self._attr_device_info = {
-            "identifiers": {(DOMAIN, self._config_entry.entry_id)},
-            "name": f"水费账户 {self._config_entry.data[CONF_USER_CODE]}",
-            "manufacturer": "武汉市水务集团"
+            "identifiers": {(DOMAIN, user_code)},
+            "name": f"水费账户 {user_code}",
+            "manufacturer": "武汉水务"
         }
 
-class WhWaterBalanceSensor(WhWaterSensor, SensorEntity):
-    """Representation of water balance."""
-
-    _attr_name = "Water Balance"
-    _attr_native_unit_of_measurement = CURRENCY_YUAN
-    _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.MEASUREMENT
+class BalanceSensor(WaterBaseSensor):
+    _attr_name = "账户余额"
+    _attr_unique_id = "balance"
     _attr_icon = "mdi:cash"
-
-    @property
-    def unique_id(self):
-        """Return a unique ID."""
-        return f"{self._config_entry.entry_id}_balance"
+    _attr_state_class = SensorStateClass.MEASUREMENT
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
-        return self.coordinator.data.get("balance")
+        return self.coordinator.data.get("restMoney")
 
-class WhWaterUsageSensor(WhWaterSensor, SensorEntity):
-    """Representation of water usage."""
-
-    _attr_name = "Water Usage"
-    _attr_native_unit_of_measurement = CURRENCY_YUAN
-    _attr_device_class = SensorDeviceClass.MONETARY
-    _attr_state_class = SensorStateClass.TOTAL_INCREASING
+class MonthlyUsageSensor(WaterBaseSensor):
+    _attr_name = "本月消耗"
+    _attr_unique_id = "monthly_usage"
     _attr_icon = "mdi:water"
-
-    @property
-    def unique_id(self):
-        """Return a unique ID."""
-        return f"{self._config_entry.entry_id}_usage"
+    _attr_state_class = SensorStateClass.TOTAL_INCREASING
 
     @property
     def native_value(self):
-        """Return the state of the sensor."""
-        return self.coordinator.data.get("usage")
+        records = self.coordinator.data.get("payMessageList", [])
+        return records[0]["totalFee"] if records else 0
 
     @property
     def extra_state_attributes(self):
-        """Return the state attributes."""
-        return self.coordinator.data.get("attributes")
+        if records := self.coordinator.data.get("payMessageList"):
+            return {ATTR_MAP[k]: v for k, v in records[0].items() if k in ATTR_MAP}
+        return {}
+
+class YearlyUsageSensor(WaterBaseSensor):
+    _attr_name = "年度消耗"
+    _attr_unique_id = "yearly_usage"
+    _attr_icon = "mdi:chart-bar"
+    _attr_state_class = SensorStateClass.TOTAL
+
+    @property
+    def native_value(self):
+        return sum(float(r["totalFee"]) for r in self.coordinator.data.get("payMessageList", []))
+
+    @property
+    def extra_state_attributes(self):
+        return {
+            "months": [
+                {ATTR_MAP[k]: v for k, v in item.items() if k in ATTR_MAP}
+                for item in self.coordinator.data.get("payMessageList", [])
+            ]
+        }

@@ -1,74 +1,44 @@
-"""Config flow for Wuhan Water integration."""
-from __future__ import annotations
-
-import logging
-from typing import Any
-
-import requests
-import voluptuous as vol
-
 from homeassistant import config_entries
-from homeassistant.core import HomeAssistant
-from homeassistant.data_entry_flow import FlowResult
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
+import voluptuous as vol
+import json
 
-from .const import API_URL, CONF_USER_CODE, DOMAIN, LOGGER
-
-DATA_SCHEMA = vol.Schema({vol.Required(CONF_USER_CODE): str})
-
-async def validate_input(hass: HomeAssistant, data: dict[str, Any]) -> dict[str, Any]:
-    """Validate the user input."""
-    try:
-        response = await hass.async_add_executor_job(
-            requests.post,
-            API_URL,
-            {"userCode": data[CONF_USER_CODE], "source": "ONLINE"},
-            {"timeout": 10}
-        )
-        result = response.json()
-        
-        if "restMoney" not in result:
-            raise InvalidAccount
-        
-        return {
-            "title": f"水费账户 {data[CONF_USER_CODE]}",
-            "data": data
-        }
-    except requests.exceptions.RequestException as err:
-        LOGGER.error("Error connecting to API: %s", err)
-        raise CannotConnect from err
+from .const import DOMAIN, API_URL, CONF_USER_CODE, REQUEST_TIMEOUT, LOGGER
 
 class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
-    """Handle a config flow for Wuhan Water."""
-
     VERSION = 1
 
-    async def async_step_user(
-        self, user_input: dict[str, Any] | None = None
-    ) -> FlowResult:
-        """Handle the initial step."""
+    async def async_step_user(self, user_input=None):
         errors = {}
-
-        if user_input is not None:
-            try:
-                info = await validate_input(self.hass, user_input)
-                return self.async_create_entry(title=info["title"], data=user_input)
-            except CannotConnect:
-                errors["base"] = "cannot_connect"
-            except InvalidAccount:
-                errors["base"] = "invalid_account"
-            except Exception:  # pylint: disable=broad-except
-                LOGGER.exception("Unexpected exception")
-                errors["base"] = "unknown"
+        if user_input:
+            valid = await self._test_connection(user_input[CONF_USER_CODE])
+            if valid:
+                return self.async_create_entry(
+                    title=f"水费账户 {user_input[CONF_USER_CODE]}",
+                    data=user_input
+                )
+            errors["base"] = "invalid_auth"
 
         return self.async_show_form(
             step_id="user",
-            data_schema=DATA_SCHEMA,
-            errors=errors,
+            data_schema=vol.Schema({
+                vol.Required(CONF_USER_CODE): str
+            }),
+            errors=errors
         )
 
-class CannotConnect(HomeAssistantError):
-    """Error to indicate we cannot connect."""
-
-class InvalidAccount(HomeAssistantError):
-    """Error to indicate there is an invalid account."""
+    async def _test_connection(self, user_code):
+        try:
+            session = async_get_clientsession(self.hass)
+            async with session.post(
+                API_URL,
+                json={"userCode": user_code, "source": "ONLINE"},
+                timeout=REQUEST_TIMEOUT
+            ) as resp:
+                if resp.status != 200:
+                    return False
+                data = await resp.json()
+                return "restMoney" in data
+        except Exception as e:
+            LOGGER.error("Connection test failed: %s", e)
+            return False
