@@ -29,9 +29,21 @@ class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
 
     async def _test_connection(self, user_code):
         try:
+            headers = {  "Content-Type": "application/json;charset=UTF-8",
+                "Accept": "*/*",
+                "Accept-Language": "zh-CN,zh-Hans;q=0.9",
+                "Accept-Encoding": "gzip, deflate",
+                "Origin": "http://wsyy.whwater.com:8223",
+                "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/18.4 Safari/605.1.15",
+                "Content-Length": "43",
+                "Connection": "keep-alive",
+                "X-Requested-With": "XMLHttpRequest",
+                "Priority": "u=3, i"
+                }
             session = async_get_clientsession(self.hass)
             async with session.post(
                 API_URL,
+                headers=headers,
                 json={"userCode": user_code, "source": "ONLINE"},
                 timeout=REQUEST_TIMEOUT
             ) as resp:
