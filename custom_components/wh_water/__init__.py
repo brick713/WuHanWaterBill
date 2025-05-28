@@ -7,7 +7,8 @@ from homeassistant.helpers.update_coordinator import DataUpdateCoordinator
 from .const import DOMAIN, LOGGER, SCAN_INTERVAL, CONF_USER_CODE
 from .sensor import async_update_data
 
-async def async_setup(hass: HomeAssistant, config: dict):
+async def async_setup(hass: HomeAssistant, config: dict) -> bool:
+    """集成基础设置"""
     return True
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
@@ -19,7 +20,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         hass,
         LOGGER,
         name=DOMAIN,
-        update_method=lambda: async_update_data(hass, user_code),  # 修复：使用lambda传递参数
+        update_method=lambda: async_update_data(hass, user_code),
         update_interval=SCAN_INTERVAL,
     )
     

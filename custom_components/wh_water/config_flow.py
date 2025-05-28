@@ -1,27 +1,30 @@
 from homeassistant import config_entries
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 import voluptuous as vol
-import json
 import logging
+import aiohttp
 
 from .const import DOMAIN, API_URL, CONF_USER_CODE, REQUEST_TIMEOUT, LOGGER
 
 class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
     CONNECTION_CLASS = config_entries.CONN_CLASS_CLOUD_POLL
+
     async def async_step_user(self, user_input=None):
         errors = {}
         if user_input is not None:
             try:
-                if await self._test_connection(user_input[CONF_USER_CODE]) == "success":
+                # 验证用户编码
+                if await self._test_connection(user_input[CONF_USER_CODE]):
                     return self.async_create_entry(
                         title=f"水费账户 {user_input[CONF_USER_CODE]}",
                         data=user_input
                     )
-                errors["base"] = "connection_failed"
+                errors["base"] = "invalid_auth"
             except Exception as e:
-                LOGGER.error("配置流程错误: %s", str(e))
-                errors["base"] = "unknown_error"
+                LOGGER.error("配置验证失败: %s", e)
+                errors["base"] = "unknown"
+
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({
@@ -30,9 +33,11 @@ class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
             description_placeholders={"note": "在武汉水务账单上查找10位用户编码"},
             errors=errors
         )
+
     async def _test_connection(self, user_code):
-        try:
-            headers = {  "Content-Type": "application/json;charset=UTF-8",
+        """测试API连接有效性"""
+        session = async_get_clientsession(self.hass)
+        headers = {  "Content-Type": "application/json;charset=UTF-8",
                 "Accept": "*/*",
                 "Accept-Language": "zh-CN,zh-Hans;q=0.9",
                 "Accept-Encoding": "gzip, deflate",
@@ -43,28 +48,23 @@ class WhWaterConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
                 "X-Requested-With": "XMLHttpRequest",
                 "Priority": "u=3, i"
                 }
-            session = async_get_clientsession(self.hass)
+        
+        try:
             async with session.post(
                 API_URL,
                 headers=headers,
                 json={"userCode": user_code, "source": "ONLINE"},
                 timeout=REQUEST_TIMEOUT
             ) as resp:
-                # 处理HTTP错误码
                 if resp.status != 200:
-                    body = await resp.text()
-                    LOGGER.error(f"HTTP错误 {resp.status}: {body}")
-                    return "http_error"
-
+                    LOGGER.warning("API响应状态码: %s", resp.status)
+                    return False
+                
                 data = await resp.json()
-                
-                # 检查关键字段
-                if "restMoney" not in data:
-                    LOGGER.error("响应缺少关键字段: %s", data)
-                    return "invalid_response"
-                    
-                return "success"
-                
+                return "restMoney" in data
         except aiohttp.ClientError as e:
-            LOGGER.error("连接错误: %s", str(e))
-            return "connection_failed"
+            LOGGER.error("网络连接错误: %s", e)
+            return False
+        except Exception as e:
+            LOGGER.error("验证过程中发生错误: %s", e)
+            return False
